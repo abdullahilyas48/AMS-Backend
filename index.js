@@ -51,22 +51,25 @@ app.post('/user-login', async (req, res) => {
     }
   });
   
-app.post('/admin-login', async (req, res) => {
+  app.post('/admin-login', async (req, res) => {
     const { email, password } = req.body;
+  
     try {
       const admin = await AdminModel.findOne({ email });
       if (!admin) {
         return res.status(404).json({ message: "No Records Exist." });
       }
-      const isMatch = await bcrypt.compare(password, admin.password); 
-      if (!isMatch) {
+
+      if (password !== admin.password) {
         return res.status(401).json({ message: "Wrong Password." });
       }
+  
       const token = jwt.sign(
         { adminId: admin._id, email: admin.email, role: "admin" },
         JWT_SECRET,
         { expiresIn: '1h' }
       );
+  
       return res.status(200).json({
         message: "Success!",
         token,
@@ -75,6 +78,7 @@ app.post('/admin-login', async (req, res) => {
           email: admin.email
         }
       });
+  
     } catch (err) {
       return res.status(500).json({ error: 'Server error', details: err.message });
     }
@@ -95,40 +99,30 @@ app.post('/register', async (req, res) => {
 });
 
 app.post('/reset-user-password', async (req, res) => {
-    const { email, newPassword } = req.body;
-    try {
-      const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-      const user = await UserModel.findOneAndUpdate(
-        { email },
-        { password: hashedPassword }
-      );
-      if (user) {
-        res.json({ Status: "Password updated successfully" });
-      } else {
-        res.json({ Status: "User not found" });
-      }
-    } catch (err) {
-      res.json({ Status: "Error", Error: err });
+  const { email, newPassword, confirmPassword } = req.body;
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ Status: "Error", Error: "Passwords do not match" });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    const user = await UserModel.findOneAndUpdate(
+      { email },
+      { password: hashedPassword }
+    );
+
+    if (user) {
+      res.status(200).json({ Status: "Password updated successfully" });
+    } else {
+      res.status(404).json({ Status: "User not found" });
     }
-  });
-  
-  app.post('/reset-admin-password', async (req, res) => {
-    const { email, newPassword } = req.body;
-    try {
-      const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-      const admin = await AdminModel.findOneAndUpdate(
-        { email },
-        { password: hashedPassword }
-      );
-      if (admin) {
-        res.json({ Status: "Password updated successfully" });
-      } else {
-        res.json({ Status: "User not found" });
-      }
-    } catch (err) {
-      res.json({ Status: "Error", Error: err });
-    }
-  });
+
+  } catch (err) {
+    res.status(500).json({ Status: "Error", Error: err.message });
+  }
+});
 
   const VehicleModel = require('./models/Vehicle');
   const BookingModel = require('./models/Booking');
@@ -172,3 +166,115 @@ app.post('/reset-user-password', async (req, res) => {
       res.status(500).json({ error: "Failed to fetch vehicles", details: err });
     }
   });  
+
+  const HotelRoomModel = require('./models/HotelRoom');
+const HotelBookingModel = require('./models/HotelBooking');
+
+// 🏨 Book Hotel Room
+app.post('/hotel-book', async (req, res) => {
+  const { userId, hotelName, roomType, date } = req.body;
+  try {
+    const room = await HotelRoomModel.findOne({ hotelName, roomType, available: true });
+    if (!room) {
+      return res.status(404).json({ error: "Room not available" });
+    }
+
+    const booking = await HotelBookingModel.create({
+      userId,
+      hotelName,
+      roomType,
+      price: room.price,
+      date
+    });
+
+    await HotelRoomModel.findByIdAndUpdate(room._id, { available: false });
+
+    res.json({ message: "Booking successful", booking });
+  } catch (err) {
+    res.status(500).json({ error: "Booking failed", details: err.message });
+  }
+});
+
+// 💰 Get available rooms (with price filter)
+app.get('/hotel-rooms', async (req, res) => {
+  const maxPrice = req.query.maxPrice;
+  const filter = maxPrice
+    ? { available: true, price: { $lte: maxPrice } }
+    : { available: true };
+
+  try {
+    const rooms = await HotelRoomModel.find(filter);
+    res.json(rooms);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch hotel rooms", details: err.message });
+  }
+});
+
+const Reservation = require('./models/Reservation');
+const ParkingSpot = require('./models/ParkingSpot');
+
+app.get('/spots', async (req, res) => {
+  try {
+    const spots = await ParkingSpot.find();
+    res.status(200).json(spots);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error while fetching spots' });
+  }
+});
+app.post('/parkings', async (req, res) => {
+  try {
+    const {
+      fullName,
+      vehicleType,
+      licensePlate,
+      reservationDate,
+      startTime,
+      endTime
+    } = req.body;
+
+    // Step 1: Find an available parking spot
+    const availableSpot = await ParkingSpot.findOne({ isAvailable: true });
+
+    if (!availableSpot) {
+      return res.status(404).json({ message: 'No available parking spots' });
+    }
+
+    // Step 2: Check for any conflicts with the selected spot and time range
+    const conflict = await Reservation.findOne({
+      spot: availableSpot._id,  // Using the `spot` field in the Reservation schema
+      reservationDate,
+      $or: [
+        { startTime: { $lt: endTime, $gte: startTime } },
+        { endTime: { $gt: startTime, $lte: endTime } },
+        { startTime: { $lte: startTime }, endTime: { $gte: endTime } }
+      ]
+    });
+
+    if (conflict) {
+      return res.status(409).json({ message: 'Spot already reserved in this time slot' });
+    }
+
+    // Step 3: Create a new reservation
+    const reservation = new Reservation({
+      spot: availableSpot._id, // Assign the parking spot's _id as the spot in the reservation
+      fullName,
+      vehicleType,
+      licensePlate,
+      reservationDate,
+      startTime,
+      endTime
+    });
+
+    await reservation.save();
+
+    // Step 4: Mark the parking spot as unavailable
+    await ParkingSpot.findByIdAndUpdate(availableSpot._id, { isAvailable: false });
+
+    // Step 5: Return success response
+    res.status(201).json({ message: 'Reservation successful', reservation });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});

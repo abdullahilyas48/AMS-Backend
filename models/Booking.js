@@ -9,5 +9,5 @@ const BookingSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-const BookingModel = mongoose.model("bookings", BookingSchema);
+const BookingModel = mongoose.model("vehiclebookings", BookingSchema);
 module.exports = BookingModel;
