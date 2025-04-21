@@ -13,7 +13,6 @@ app.listen(3001,()=>{
     
 })
 
-
 const bcrypt = require('bcrypt');
 const saltRounds = 10;
 
