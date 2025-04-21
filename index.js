@@ -10,12 +10,13 @@ const app = express()
 app.use(express.json())
 app.use(cors())
 
-mongoose.connect("mongodb://127.0.0.1:27017/User")
-.then(()=>{
-  console.log("✅ MongoDB is connected")
-}).catch((err)=>{
-  console.log("❌ MongoDB connection failed", err.message)
-})
+mongoose.connect("mongodb://127.0.0.1:27017/AMS")
+  .then(() => {
+    console.log("✅ AMS database is connected");
+  })
+  .catch((err) => {
+    console.log("❌ AMS database connection failed", err.message);
+  });
 
 app.listen(7798,()=>{
   console.log("✅ Server is running on http://localhost:7798");
