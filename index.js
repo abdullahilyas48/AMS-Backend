@@ -276,3 +276,121 @@ app.post('/parkings', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+const LoungeModel = require('./models/Lounge');
+const LoungeBookingModel = require('./models/LoungeBooking');
+
+app.post('/book-lounge', async (req, res) => {
+  const { userId, loungeId, date, time } = req.body;
+  try {
+    const lounge = await LoungeModel.findById(loungeId);
+    if (!lounge || !lounge.available) {
+      return res.status(404).json({ error: "Lounge not available" });
+    }
+
+    const booking = await LoungeBookingModel.create({
+      userId,
+      loungeId,
+      date,
+      time
+    });
+
+    await LoungeModel.findByIdAndUpdate(loungeId, { available: false });
+
+    res.json({ message: "Lounge booked successfully", booking });
+  } catch (err) {
+    res.status(500).json({ error: "Booking failed", details: err.message });
+  }
+});
+
+app.get('/lounges', async (req, res) => {
+  try {
+    const lounges = await LoungeModel.find({ available: true });
+    res.json(lounges);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch lounges", details: err.message });
+  }
+});
+
+const FlightModel = require('./models/Flight');
+const FlightBookingModel = require('./models/FlightBooking');
+
+// Get all available flights with filters
+app.get('/flights', async (req, res) => {
+  const { from, to, date, flightClass, maxPrice, luggageWeight } = req.query;
+
+  const filter = {
+    available: true,
+    ...(from && { from }),
+    ...(to && { to }),
+    ...(date && { date }),
+    ...(flightClass && { flightClass }),
+    ...(maxPrice && { price: { $lte: Number(maxPrice) } }),
+    ...(luggageWeight && { maxLuggageWeight: { $gte: Number(luggageWeight) } })
+  };
+
+  try {
+    const flights = await FlightModel.find(filter);
+    if (flights.length === 0) {
+      return res.json({ message: "No flights match the criteria" });
+    }
+    res.json(flights);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch flights", details: err.message });
+  }
+});
+
+// Book a flight
+app.post('/book-flight', async (req, res) => {
+  const { userId, flightId, luggageWeight } = req.body;
+  try {
+    const flight = await FlightModel.findById(flightId);
+
+    if (!flight || !flight.available || flight.seatsAvailable < 1) {
+      return res.status(404).json({ error: "Flight not available" });
+    }
+
+    if (luggageWeight > flight.maxLuggageWeight) {
+      return res.status(400).json({ error: "Luggage exceeds allowed weight" });
+    }
+
+    const booking = await FlightBookingModel.create({
+      userId,
+      flightId,
+      luggageWeight
+    });
+
+    flight.seatsAvailable -= 1;
+    if (flight.seatsAvailable === 0) flight.available = false;
+    await flight.save();
+
+    res.json({ message: "Flight booked successfully", booking });
+  } catch (err) {
+    res.status(500).json({ error: "Booking failed", details: err.message });
+  }
+});
+
+app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
+  const { bookingId } = req.params;
+
+  try {
+    const booking = await FlightBookingModel.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const flightId = booking.flightId;
+
+    // Delete booking
+    await FlightBookingModel.findByIdAndDelete(bookingId);
+
+    // Increment available seats on the flight
+    await FlightModel.findByIdAndUpdate(flightId, {
+      $inc: { seatsAvailable: 1 }
+    });
+
+    res.json({ message: "Booking cancelled successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Cancellation failed", details: err.message });
+  }
+});
