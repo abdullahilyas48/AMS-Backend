@@ -222,9 +222,11 @@ app.get('/spots', async (req, res) => {
     res.status(500).json({ message: 'Server error while fetching spots' });
   }
 });
+
 app.post('/parkings', async (req, res) => {
   try {
     const {
+      selectedSpotId,
       fullName,
       vehicleType,
       licensePlate,
@@ -233,16 +235,14 @@ app.post('/parkings', async (req, res) => {
       endTime
     } = req.body;
 
-    // Step 1: Find an available parking spot
-    const availableSpot = await ParkingSpot.findOne({ isAvailable: true });
+    const selectedSpot = await ParkingSpot.findOne({ _id: selectedSpotId, isAvailable: true });
 
-    if (!availableSpot) {
-      return res.status(404).json({ message: 'No available parking spots' });
+    if (!selectedSpot) {
+      return res.status(404).json({ message: 'Selected parking spot is unavailable or does not exist' });
     }
 
-    // Step 2: Check for any conflicts with the selected spot and time range
     const conflict = await Reservation.findOne({
-      spot: availableSpot._id,  // Using the `spot` field in the Reservation schema
+      spot: selectedSpot._id,
       reservationDate,
       $or: [
         { startTime: { $lt: endTime, $gte: startTime } },
@@ -255,9 +255,9 @@ app.post('/parkings', async (req, res) => {
       return res.status(409).json({ message: 'Spot already reserved in this time slot' });
     }
 
-    // Step 3: Create a new reservation
+    // Step 3: Create reservation
     const reservation = new Reservation({
-      spot: availableSpot._id, // Assign the parking spot's _id as the spot in the reservation
+      spot: selectedSpot._id,
       fullName,
       vehicleType,
       licensePlate,
@@ -268,10 +268,8 @@ app.post('/parkings', async (req, res) => {
 
     await reservation.save();
 
-    // Step 4: Mark the parking spot as unavailable
-    await ParkingSpot.findByIdAndUpdate(availableSpot._id, { isAvailable: false });
+    await ParkingSpot.findByIdAndUpdate(selectedSpot._id, { isAvailable: false });
 
-    // Step 5: Return success response
     res.status(201).json({ message: 'Reservation successful', reservation });
   } catch (err) {
     console.error(err);
