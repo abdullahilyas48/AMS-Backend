@@ -28,6 +28,7 @@ app.get('/', (req, res) => {
 
 const JWT_SECRET = 'token';
 const saltRounds = 10;
+
 app.post('/user-login', async (req, res) => {
     const { email, password } = req.body;
     try {
@@ -84,7 +85,7 @@ app.post('/user-login', async (req, res) => {
     }
   });
   
-app.post('/register', async (req, res) => {
+app.post('/register-user', async (req, res) => {
   try {
     const existingUser = await UserModel.findOne({ email: req.body.email });
       if (existingUser) {
@@ -125,10 +126,10 @@ app.post('/reset-user-password', async (req, res) => {
 });
 
   const VehicleModel = require('./models/Vehicle');
-  const BookingModel = require('./models/Booking');
+  const BookingModel = require('./models/VehicleBooking');
   
   // 📥 Create Booking
-  app.post('/book', async (req, res) => {
+  app.post('/book-vehicles', async (req, res) => {
     const { userId, vehicleId, date, time, destination } = req.body;
     try {
       const vehicle = await VehicleModel.findById(vehicleId);
@@ -151,6 +152,25 @@ app.post('/reset-user-password', async (req, res) => {
       res.status(500).json({ error: "Booking failed", details: err });
     }
   });
+
+  app.delete('/cancel-vehicle-booking/:bookingId', async (req, res) => {
+    const { bookingId } = req.params;
+  
+    try {
+      const booking = await BookingModel.findByIdAndDelete(bookingId);
+  
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+  
+      await VehicleModel.findByIdAndUpdate(booking.vehicleId, { available: true });
+  
+      res.json({ message: "Booking cancelled and vehicle is now available" });
+    } catch (err) {
+      res.status(500).json({ error: "Cancellation failed", details: err.message });
+    }
+  });
+  
   
   // 📤 Get all available vehicles with optional price filter
   app.get('/vehicles', async (req, res) => {
@@ -195,6 +215,30 @@ app.post('/hotel-book', async (req, res) => {
   }
 });
 
+app.delete('/cancel-hotel-booking/:bookingId', async (req, res) => {
+  const { bookingId } = req.params;
+
+  try {
+    // Find and delete the booking
+    const booking = await HotelBookingModel.findByIdAndDelete(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    // Make the room available again
+    await HotelRoomModel.findOneAndUpdate(
+      { hotelName: booking.hotelName, roomType: booking.roomType },
+      { available: true }
+    );
+
+    res.json({ message: "Hotel booking cancelled, room is now available" });
+  } catch (err) {
+    res.status(500).json({ error: "Cancellation failed", details: err.message });
+  }
+});
+
+
 // 💰 Get available rooms (with price filter)
 app.get('/hotel-rooms', async (req, res) => {
   const maxPrice = req.query.maxPrice;
@@ -210,10 +254,10 @@ app.get('/hotel-rooms', async (req, res) => {
   }
 });
 
-const Reservation = require('./models/Reservation');
+const Reservation = require('./models/ParkingReservation');
 const ParkingSpot = require('./models/ParkingSpot');
 
-app.get('/spots', async (req, res) => {
+app.get('/parking-spots', async (req, res) => {
   try {
     const spots = await ParkingSpot.find();
     res.status(200).json(spots);
@@ -223,7 +267,7 @@ app.get('/spots', async (req, res) => {
   }
 });
 
-app.post('/parkings', async (req, res) => {
+app.post('/parking-reservation', async (req, res) => {
   try {
     const {
       selectedSpotId,
@@ -277,15 +321,42 @@ app.post('/parkings', async (req, res) => {
   }
 });
 
+app.delete('/cancel-parking-reservation/:reservationId', async (req, res) => {
+  const { reservationId } = req.params;
+
+  try {
+    const reservation = await Reservation.findByIdAndDelete(reservationId);
+
+    if (!reservation) {
+      return res.status(404).json({ message: 'Reservation not found' });
+    }
+
+    // Mark the parking spot as available again
+    await ParkingSpot.findByIdAndUpdate(reservation.spot, { isAvailable: true });
+
+    res.json({ message: 'Parking reservation cancelled and spot is now available' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to cancel reservation', error: err.message });
+  }
+});
+
+
 const LoungeModel = require('./models/Lounge');
 const LoungeBookingModel = require('./models/LoungeBooking');
 
 app.post('/book-lounge', async (req, res) => {
   const { userId, loungeId, date, time } = req.body;
+
   try {
     const lounge = await LoungeModel.findById(loungeId);
+
     if (!lounge || !lounge.available) {
       return res.status(404).json({ error: "Lounge not available" });
+    }
+
+    if (lounge.bookedCount >= lounge.capacity) {
+      return res.status(400).json({ error: "Lounge is fully booked" });
     }
 
     const booking = await LoungeBookingModel.create({
@@ -295,13 +366,50 @@ app.post('/book-lounge', async (req, res) => {
       time
     });
 
-    await LoungeModel.findByIdAndUpdate(loungeId, { available: false });
+    // Increment bookedCount
+    const newBookedCount = lounge.bookedCount + 1;
+const isNowFull = newBookedCount >= lounge.capacity;
+
+await LoungeModel.findByIdAndUpdate(loungeId, {
+  bookedCount: newBookedCount,
+  available: !isNowFull
+});
+
 
     res.json({ message: "Lounge booked successfully", booking });
   } catch (err) {
     res.status(500).json({ error: "Booking failed", details: err.message });
   }
 });
+
+app.delete('/cancel-lounge-booking/:bookingId', async (req, res) => {
+  const { bookingId } = req.params;
+
+  try {
+    const booking = await LoungeBookingModel.findByIdAndDelete(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    const lounge = await LoungeModel.findById(booking.loungeId);
+    if (lounge) {
+      const updatedCount = lounge.bookedCount - 1;
+      const isNowAvailable = updatedCount < lounge.capacity;
+
+await LoungeModel.findByIdAndUpdate(lounge._id, {
+  bookedCount: updatedCount,
+  available: isNowAvailable
+});
+
+    }
+
+    res.json({ message: "Lounge booking cancelled successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Cancellation failed", details: err.message });
+  }
+});
+
 
 app.get('/lounges', async (req, res) => {
   try {

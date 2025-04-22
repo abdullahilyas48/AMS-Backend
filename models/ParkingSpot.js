@@ -6,4 +6,4 @@ const ParkingSpotSchema = new mongoose.Schema({
   isAvailable: { type: Boolean, default: true }
 });
 
-module.exports = mongoose.model('parkings', ParkingSpotSchema);
+module.exports = mongoose.model('parkingspots', ParkingSpotSchema);
