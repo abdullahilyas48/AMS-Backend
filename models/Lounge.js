@@ -7,4 +7,4 @@ const LoungeSchema = new mongoose.Schema({
   available: { type: Boolean, default: true }
 });
 
-module.exports = mongoose.model('Lounge', LoungeSchema);
+module.exports = mongoose.model('lounges', LoungeSchema);

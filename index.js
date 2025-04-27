@@ -502,3 +502,136 @@ app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
     res.status(500).json({ error: "Cancellation failed", details: err.message });
   }
 });
+
+app.post('/reschedule-flight', async (req, res) => {
+  const { bookingId, newDate, newTime, newFlightClass, luggageWeight } = req.body;
+
+  try {
+    // Find the existing booking
+    const booking = await FlightBookingModel.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    // Find the current flight associated with the booking
+    const oldFlight = await FlightModel.findById(booking.flightId);
+    if (!oldFlight) {
+      return res.status(404).json({ error: "Old flight not found" });
+    }
+
+    console.log('Old Flight Before Update:', oldFlight);  // Log before update
+
+    // Find a new flight with the same source and destination
+    const newFlight = await FlightModel.findOne({
+      from: oldFlight.from,  // Same source as the original flight
+      to: oldFlight.to,      // Same destination as the original flight
+      date: newDate,
+      time: newTime,
+      flightClass: newFlightClass,
+      available: true,
+      seatsAvailable: { $gte: 1 }
+    });
+
+    if (!newFlight) {
+      return res.status(404).json({ error: "No matching flight available for rescheduling" });
+    }
+
+    // Check if the new luggage weight exceeds the new flight's max limit
+    if (luggageWeight > newFlight.maxLuggageWeight) {
+      return res.status(400).json({ error: `Luggage exceeds the allowed weight of ${newFlight.maxLuggageWeight}kg for the new flight` });
+    }
+
+    // If everything is valid, update the old flight's seat availability and availability status
+    oldFlight.seatsAvailable += 1;  // Only update this if rescheduling succeeds
+    if (oldFlight.seatsAvailable > 0) {
+      oldFlight.available = true;  // Set available to true if seats are available
+    } else {
+      oldFlight.available = false;  // Set available to false if no seats are left
+    }
+    await oldFlight.save();  // Save the old flight after updating
+
+    // Decrease the available seats for the new flight
+    newFlight.seatsAvailable -= 1;
+    if (newFlight.seatsAvailable === 0) {
+      newFlight.available = false;
+    }
+    await newFlight.save();  // Save the updated new flight
+
+    // Update the booking with the new flight details and luggage weight
+    booking.flightId = newFlight._id;
+    booking.luggageWeight = luggageWeight;  // Take new luggage weight from the request
+    await booking.save();
+
+    res.json({ message: "Flight rescheduled successfully", booking });
+  } catch (err) {
+    res.status(500).json({ error: "Rescheduling failed", details: err.message });
+  }
+});
+
+app.get('/booked-flights', async (req, res) => {
+  try {
+    // Find all bookings, populating the flight information (flightId references Flight model)
+    const bookings = await FlightBookingModel.find()
+      .populate('flightId', 'flightNumber airline from to date time flightClass price seatsAvailable available')
+      .exec();
+
+    if (bookings.length === 0) {
+      return res.json({ message: 'No bookings found.' });
+    }
+
+    // Return all booked flights along with flight details
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch booked flights', details: err.message });
+  }
+});
+
+const { convertCurrency } = require('./services/currencyConverter');
+
+// Currency conversion route
+app.post('/convert-currency', async (req, res) => {
+  const { amount, fromCurrency, toCurrency } = req.body;
+
+  try {
+      if (!amount || !fromCurrency || !toCurrency) {
+          return res.status(400).json({ error: 'Please provide amount, fromCurrency, and toCurrency' });
+      }
+
+      if (fromCurrency.toUpperCase() === toCurrency.toUpperCase()) {
+          return res.status(400).json({ error: 'From and To currencies must be different' });
+      }
+
+      const { rate, convertedAmount } = await convertCurrency(amount, fromCurrency.toUpperCase(), toCurrency.toUpperCase());
+
+      res.json({
+          amount,
+          fromCurrency: fromCurrency.toUpperCase(),
+          toCurrency: toCurrency.toUpperCase(),
+          rate,
+          convertedAmount
+      });
+  } catch (error) {
+      res.status(500).json({ error: error.message });
+  }
+});
+
+const { trackLuggage } = require('./services/luggageTracking');
+app.post('/track-luggage', async (req, res) => {
+  const { flightNumber, luggageId } = req.body;
+
+  try {
+      if (!flightNumber || !luggageId) {
+          return res.status(400).json({ error: 'Please provide flightNumber and luggageId' });
+      }
+
+      const status = await trackLuggage(flightNumber, luggageId);
+
+      res.json({
+          flightNumber: flightNumber.toUpperCase(),
+          luggageId: luggageId.toUpperCase(),
+          status
+      });
+  } catch (error) {
+      res.status(404).json({ error: error.message });
+  }
+});
