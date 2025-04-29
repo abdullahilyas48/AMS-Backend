@@ -4,6 +4,7 @@ const FlightBookingSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'users' },
   flightId: { type: mongoose.Schema.Types.ObjectId, ref: 'flights' },
   luggageWeight: Number,
+  seatNumber: String,     // ✨ new field
   bookedAt: { type: Date, default: Date.now }
 });
 
