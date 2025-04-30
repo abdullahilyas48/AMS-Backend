@@ -6,6 +6,7 @@ const mongoose = require("mongoose")
 const cors = require ('cors')
 const UserModel = require('./models/User')
 const AdminModel = require('./models/Admin')
+const { addPoints } = require('./services/RewardsService');
 const app = express()
 app.use(express.json())
 app.use(cors())
@@ -51,6 +52,20 @@ app.post('/user-login', async (req, res) => {
       return res.status(500).json({ error: 'Server error', details: err.message });
     }
   });
+
+  const authenticateToken = require('./middleware/auth');
+
+app.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await UserModel.findById(req.user.userId).select('name email');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    res.json({ name: user.name, email: user.email });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch user', details: err.message });
+  }
+});
+
   
   app.post('/admin-login', async (req, res) => {
     const { email, password } = req.body;
@@ -146,6 +161,8 @@ app.post('/reset-user-password', async (req, res) => {
       });
   
       await VehicleModel.findByIdAndUpdate(vehicleId, { available: false });
+
+      await addPoints(userId, 'vehicle');
   
       res.json({ message: "Booking successful", booking });
     } catch (err) {
@@ -208,6 +225,8 @@ app.post('/hotel-book', async (req, res) => {
     });
 
     await HotelRoomModel.findByIdAndUpdate(room._id, { available: false });
+
+    await addPoints(userId, 'hotel');
 
     res.json({ message: "Booking successful", booking });
   } catch (err) {
@@ -375,6 +394,7 @@ await LoungeModel.findByIdAndUpdate(loungeId, {
   available: !isNowFull
 });
 
+await addPoints(userId, 'lounge');
 
     res.json({ message: "Lounge booked successfully", booking });
   } catch (err) {
@@ -450,7 +470,7 @@ app.get('/flights', async (req, res) => {
 
 // Book a flight
 app.post('/book-flight', async (req, res) => {
-  const { userId, flightId, luggageWeight } = req.body;
+  const { userId, flightId, luggageWeight, seatNumber } = req.body;
   try {
     const flight = await FlightModel.findById(flightId);
 
@@ -462,15 +482,30 @@ app.post('/book-flight', async (req, res) => {
       return res.status(400).json({ error: "Luggage exceeds allowed weight" });
     }
 
+    // Check if seat is already booked for this flight
+const existingSeat = await FlightBookingModel.findOne({ 
+  flightId, 
+  seatNumber 
+});
+
+if (existingSeat) {
+  return res.status(400).json({ error: "This seat is already booked. Please choose another one." });
+}
+
+
     const booking = await FlightBookingModel.create({
       userId,
       flightId,
-      luggageWeight
+      luggageWeight,
+      seatNumber   // ✨ save seat number
     });
+    
 
     flight.seatsAvailable -= 1;
     if (flight.seatsAvailable === 0) flight.available = false;
     await flight.save();
+
+    await addPoints(userId, 'flight');
 
     res.json({ message: "Flight booked successfully", booking });
   } catch (err) {
@@ -504,7 +539,7 @@ app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
 });
 
 app.post('/reschedule-flight', async (req, res) => {
-  const { bookingId, newDate, newTime, newFlightClass, luggageWeight } = req.body;
+  const { bookingId, newDate, newTime, newFlightClass, luggageWeight, seatNumber } = req.body;
 
   try {
     // Find the existing booking
@@ -560,6 +595,7 @@ app.post('/reschedule-flight', async (req, res) => {
     // Update the booking with the new flight details and luggage weight
     booking.flightId = newFlight._id;
     booking.luggageWeight = luggageWeight;  // Take new luggage weight from the request
+    if (seatNumber) booking.seatNumber = seatNumber;
     await booking.save();
 
     res.json({ message: "Flight rescheduled successfully", booking });
@@ -572,7 +608,7 @@ app.get('/booked-flights', async (req, res) => {
   try {
     // Find all bookings, populating the flight information (flightId references Flight model)
     const bookings = await FlightBookingModel.find()
-      .populate('flightId', 'flightNumber airline from to date time flightClass price seatsAvailable available')
+      .populate('flightId', 'flightNumber airline from to date time arrivalTime flightClass price seatsAvailable available seatNumber')
       .exec();
 
     if (bookings.length === 0) {
@@ -633,5 +669,113 @@ app.post('/track-luggage', async (req, res) => {
       });
   } catch (error) {
       res.status(404).json({ error: error.message });
+  }
+});
+
+const { redeemPoints } = require('./services/RewardsService');
+
+app.post('/redeem-points', async (req, res) => {
+  const { userId, points } = req.body;
+  try {
+    const remaining = await redeemPoints(userId, points);
+    res.json({ message: "Points redeemed", remainingPoints: remaining });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/user-rewards/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const user = await UserModel.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json({ rewards: user.rewards });
+  } catch (err) {
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// Flight status API
+app.get('/flight-status/:flightNumber', async (req, res) => {
+  const { flightNumber } = req.params;
+  
+  try {
+    // Find the flight by its flight number
+    const flight = await FlightModel.findOne({ flightNumber });
+
+    if (!flight) {
+      return res.status(404).json({ error: 'Flight not found' });
+    }
+
+    // Just an example: you can either store this data manually or connect to an external API for real-time status
+    const flightStatus = getFlightStatus(flightNumber); // Assume this function fetches or simulates the flight status
+
+    res.json({
+      flightNumber: flight.flightNumber,
+      airline: flight.airline,
+      status: flightStatus, // e.g., 'Boarding', 'In Flight', 'Landed'
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch flight status', details: err.message });
+  }
+});
+
+// Helper function to simulate or fetch flight status
+const getFlightStatus = (flightNumber) => {
+  // Simulate the status for now or connect to external flight tracking services
+  const statuses = ['Boarding', 'In Flight', 'Landed', 'Delayed', 'Cancelled', 'Taxiing'];
+  return statuses[Math.floor(Math.random() * statuses.length)];
+};
+
+const DutiesModel = require('./models/Duties');  // Correct the import
+
+app.post('/assign-duty', async (req, res) => {
+  const { taskName, staffName, date, time, taskDescription, frequency, location } = req.body;
+
+  // Validate frequency
+  if (!['daily', 'weekly', 'monthly'].includes(frequency)) {
+    return res.status(400).json({ error: "Invalid frequency value. It must be 'daily', 'weekly', or 'monthly'" });
+  }
+
+  try {
+    const duty = new DutiesModel({
+      taskName,
+      staffName,
+      date,
+      time,
+      taskDescription,
+      assigned: true,
+      frequency,  // Store frequency of the duty
+      location    // Store location of the duty
+    });
+
+    await duty.save();
+
+    res.json({ message: "Duty assigned successfully", duty });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to assign duty", details: err.message });
+  }
+});
+
+app.get('/duties/:staffName', async (req, res) => {
+  const { staffName } = req.params;
+  const { frequency, location } = req.query;  // Allow filtering by frequency and location
+
+  const filter = {
+    staffName,
+    ...(frequency && { frequency }),  // Optional filter based on frequency
+    ...(location && { location })      // Optional filter based on location
+  };
+
+  try {
+    const duties = await DutiesModel.find(filter);
+
+    if (duties.length === 0) {
+      return res.json({ message: "No duties found for this staff member" });
+    }
+
+    res.json(duties);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch duties", details: err.message });
   }
 });
