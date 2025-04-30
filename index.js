@@ -66,7 +66,7 @@ app.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
-  
+
   app.post('/admin-login', async (req, res) => {
     const { email, password } = req.body;
   
@@ -541,6 +541,10 @@ app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
 app.post('/reschedule-flight', async (req, res) => {
   const { bookingId, newDate, newTime, newFlightClass, luggageWeight, seatNumber } = req.body;
 
+  if (!seatNumber) {
+    return res.status(400).json({ error: "New seat number is required for rescheduling" });
+  }
+
   try {
     // Find the existing booking
     const booking = await FlightBookingModel.findById(bookingId);
@@ -554,12 +558,10 @@ app.post('/reschedule-flight', async (req, res) => {
       return res.status(404).json({ error: "Old flight not found" });
     }
 
-    console.log('Old Flight Before Update:', oldFlight);  // Log before update
-
     // Find a new flight with the same source and destination
     const newFlight = await FlightModel.findOne({
-      from: oldFlight.from,  // Same source as the original flight
-      to: oldFlight.to,      // Same destination as the original flight
+      from: oldFlight.from,
+      to: oldFlight.to,
       date: newDate,
       time: newTime,
       flightClass: newFlightClass,
@@ -576,26 +578,30 @@ app.post('/reschedule-flight', async (req, res) => {
       return res.status(400).json({ error: `Luggage exceeds the allowed weight of ${newFlight.maxLuggageWeight}kg for the new flight` });
     }
 
-    // If everything is valid, update the old flight's seat availability and availability status
-    oldFlight.seatsAvailable += 1;  // Only update this if rescheduling succeeds
-    if (oldFlight.seatsAvailable > 0) {
-      oldFlight.available = true;  // Set available to true if seats are available
-    } else {
-      oldFlight.available = false;  // Set available to false if no seats are left
-    }
-    await oldFlight.save();  // Save the old flight after updating
+    // ✅ Check if seat is already booked on the new flight
+    const seatTaken = await FlightBookingModel.findOne({
+      flightId: newFlight._id,
+      seatNumber
+    });
 
-    // Decrease the available seats for the new flight
+    if (seatTaken) {
+      return res.status(400).json({ error: "This seat is already taken on the new flight. Please select another one." });
+    }
+
+    // Restore seat on old flight
+    oldFlight.seatsAvailable += 1;
+    oldFlight.available = oldFlight.seatsAvailable > 0;
+    await oldFlight.save();
+
+    // Reduce seat on new flight
     newFlight.seatsAvailable -= 1;
-    if (newFlight.seatsAvailable === 0) {
-      newFlight.available = false;
-    }
-    await newFlight.save();  // Save the updated new flight
+    newFlight.available = newFlight.seatsAvailable > 0;
+    await newFlight.save();
 
-    // Update the booking with the new flight details and luggage weight
+    // Update booking
     booking.flightId = newFlight._id;
-    booking.luggageWeight = luggageWeight;  // Take new luggage weight from the request
-    if (seatNumber) booking.seatNumber = seatNumber;
+    booking.luggageWeight = luggageWeight;
+    booking.seatNumber = seatNumber; // ✅ force new seat
     await booking.save();
 
     res.json({ message: "Flight rescheduled successfully", booking });
@@ -603,6 +609,7 @@ app.post('/reschedule-flight', async (req, res) => {
     res.status(500).json({ error: "Rescheduling failed", details: err.message });
   }
 });
+
 
 app.get('/booked-flights', async (req, res) => {
   try {
