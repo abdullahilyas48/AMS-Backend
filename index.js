@@ -52,6 +52,20 @@ app.post('/user-login', async (req, res) => {
       return res.status(500).json({ error: 'Server error', details: err.message });
     }
   });
+
+  const authenticateToken = require('./middleware/auth');
+
+app.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await UserModel.findById(req.user.userId).select('name email');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    res.json({ name: user.name, email: user.email });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch user', details: err.message });
+  }
+});
+
   
   app.post('/admin-login', async (req, res) => {
     const { email, password } = req.body;
