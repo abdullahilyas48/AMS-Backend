@@ -278,13 +278,15 @@ const ParkingSpot = require('./models/ParkingSpot');
 
 app.get('/parking-spots', async (req, res) => {
   try {
-    const spots = await ParkingSpot.find();
+    // Only fetch available spots
+    const spots = await ParkingSpot.find({ isAvailable: true });
     res.status(200).json(spots);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error while fetching spots' });
   }
 });
+
 
 app.post('/parking-reservation', async (req, res) => {
   try {
