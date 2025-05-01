@@ -6,6 +6,7 @@ const REWARD_CONFIG = {
   hotel: 15,
   lounge: 20,
   flight: 25,
+  airplane: 50,
 };
 
 async function addPoints(userId, type) {
