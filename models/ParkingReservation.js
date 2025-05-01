@@ -7,9 +7,10 @@ const ReservationSchema = new mongoose.Schema({
   vehicleType: { type: String, required: true },
   licensePlate: { type: String, required: true },
   reservationDate: { type: Date, required: true },
-  startTime: { type: Date, required: true },
-  endTime: { type: Date, required: true }
+  startTime: { type: String, required: true },
+  endTime: { type: String, required: true }
 });
 
 module.exports = mongoose.model('parkingreservations', ReservationSchema);
+
 
