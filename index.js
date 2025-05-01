@@ -808,6 +808,25 @@ app.get('/duties', async (req, res) => {
 const HangarReservation = require('./models/HangarReservation'); 
 const HangarSpot = require('./models/HangarSpot');
 
+app.get('/available-hangars', async (req, res) => {
+  try {
+    const availableHangars = await HangarSpot.find({ isAvailable: true });
+
+    res.status(200).json({
+      success: true,
+      hangars: availableHangars
+    });
+  } catch (error) {
+    console.error('Error fetching available hangars:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch available hangars',
+      error: error.message
+    });
+  }
+});
+
+
 app.post('/hangar-reservation', async (req, res) => {
   try {
     const {
