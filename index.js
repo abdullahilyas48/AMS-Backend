@@ -943,3 +943,55 @@ app.delete('/delete-hangar/:hangarId', async (req, res) => {
     return res.status(500).json({ success: false, message: "Server Error", error: error.message });
   }
 });
+
+app.get('/passenger-details', async (req, res) => {
+  const { date, flightNumber } = req.query;
+
+  try {
+    // Step 1: Build flight filter (partial if needed)
+    const flightFilter = {};
+    if (date) flightFilter.date = date;
+    if (flightNumber) flightFilter.flightNumber = { $regex: flightNumber, $options: 'i' };
+
+    // Step 2: Get matching flights
+    const matchingFlights = await FlightModel.find(flightFilter);
+
+    if (matchingFlights.length === 0) {
+      return res.json({ message: "No matching flights found" });
+    }
+
+    const flightIds = matchingFlights.map(flight => flight._id);
+    const flightMap = Object.fromEntries(matchingFlights.map(f => [f._id.toString(), f]));
+
+    // Step 3: Find bookings for those flights
+    const bookings = await FlightBookingModel.find({ flightId: { $in: flightIds } })
+      .populate('userId', 'name') // only get name from User
+      .lean();
+
+    if (bookings.length === 0) {
+      return res.json({ message: "No passengers found for the given criteria" });
+    }
+
+    // Step 4: Build response
+    const passengerDetails = bookings.map(booking => {
+      const flight = flightMap[booking.flightId.toString()];
+      return {
+        passengerName: booking.userId.name,
+        departure: {
+          location: flight.from,
+          time: flight.time
+        },
+        arrival: {
+          location: flight.to,
+          time: flight.arrivalTime
+        },
+        seatNumber: booking.seatNumber
+      };
+    });
+
+    res.json(passengerDetails);
+
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch passenger details", details: err.message });
+  }
+});
