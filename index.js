@@ -783,21 +783,20 @@ app.post('/assign-duty', async (req, res) => {
   }
 });
 
-app.get('/duties/:staffName', async (req, res) => {
-  const { staffName } = req.params;
-  const { frequency, location } = req.query;  // Allow filtering by frequency and location
+app.get('/duties', async (req, res) => {
+  const { staffName, frequency, location } = req.query;
 
   const filter = {
-    staffName,
-    ...(frequency && { frequency }),  // Optional filter based on frequency
-    ...(location && { location })      // Optional filter based on location
+    ...(staffName && { staffName }),
+    ...(frequency && { frequency }),
+    ...(location && { location })
   };
 
   try {
     const duties = await DutiesModel.find(filter);
 
     if (duties.length === 0) {
-      return res.json({ message: "No duties found for this staff member" });
+      return res.json({ message: "No duties found matching criteria" });
     }
 
     res.json(duties);
