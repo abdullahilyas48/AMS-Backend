@@ -806,6 +806,7 @@ app.get('/duties', async (req, res) => {
 });
 
 const HangarReservation = require('./models/HangarReservation'); 
+const HangarSpot = require('./models/HangarSpot');
 app.post('/hangar-reservation', async (req, res) => {
   try {
     const {
