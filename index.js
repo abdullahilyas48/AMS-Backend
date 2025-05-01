@@ -445,16 +445,17 @@ const FlightBookingModel = require('./models/FlightBooking');
 
 // Get all available flights with filters
 app.get('/flights', async (req, res) => {
-  const { from, to, date, flightClass, maxPrice, luggageWeight } = req.query;
+  const { from, to, date, flightClass, maxPrice, luggageWeight, flightNumber } = req.query;
 
   const filter = {
     available: true,
     ...(from && { from }),
     ...(to && { to }),
-    ...(date && { date }),
+    ...(date && { date }), // Optional exact match
     ...(flightClass && { flightClass }),
     ...(maxPrice && { price: { $lte: Number(maxPrice) } }),
-    ...(luggageWeight && { maxLuggageWeight: { $gte: Number(luggageWeight) } })
+    ...(luggageWeight && { maxLuggageWeight: { $gte: Number(luggageWeight) } }),
+    ...(flightNumber && { flightNumber: { $regex: flightNumber, $options: 'i' } }) // ✨ partial match, case-insensitive
   };
 
   try {
@@ -467,6 +468,7 @@ app.get('/flights', async (req, res) => {
     res.status(500).json({ error: "Failed to fetch flights", details: err.message });
   }
 });
+
 
 // Book a flight
 app.post('/book-flight', async (req, res) => {
@@ -707,30 +709,38 @@ app.get('/flight-status/:flightNumber', async (req, res) => {
   const { flightNumber } = req.params;
   
   try {
-    // Find the flight by its flight number
     const flight = await FlightModel.findOne({ flightNumber });
 
     if (!flight) {
       return res.status(404).json({ error: 'Flight not found' });
     }
 
-    // Just an example: you can either store this data manually or connect to an external API for real-time status
-    const flightStatus = getFlightStatus(flightNumber); // Assume this function fetches or simulates the flight status
+    // Simulated or static status (replace this with real-time logic if available)
+    const flightStatus = getFlightStatus(flightNumber); // Example function you define
 
     res.json({
       flightNumber: flight.flightNumber,
       airline: flight.airline,
-      status: flightStatus, // e.g., 'Boarding', 'In Flight', 'Landed'
+      departure: {
+        location: flight.from,
+        time: flight.time
+      },
+      destination: {
+        location: flight.to,
+        time: flight.arrivalTime
+      },
+      status: flightStatus
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch flight status', details: err.message });
   }
 });
 
+
 // Helper function to simulate or fetch flight status
 const getFlightStatus = (flightNumber) => {
   // Simulate the status for now or connect to external flight tracking services
-  const statuses = ['Boarding', 'In Flight', 'Landed', 'Delayed', 'Cancelled', 'Taxiing'];
+  const statuses = ['Scheduled', 'Boarding', 'In Flight', 'Landed', 'Delayed', 'Cancelled', 'Taxiing'];
   return statuses[Math.floor(Math.random() * statuses.length)];
 };
 
