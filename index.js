@@ -813,8 +813,8 @@ app.post('/hangar-reservation', async (req, res) => {
       selectedHangarId,
       ownerName,
       reservationDate,
-      startDate,
-      endDate
+      startTime,
+      endTime
     } = req.body;
 
     // Ensure userId is provided
@@ -837,9 +837,9 @@ app.post('/hangar-reservation', async (req, res) => {
       spot: selectedHangar._id,
       reservationDate,
       $or: [
-        { startDate: { $lt: endDate, $gte: startDate } },
-        { endDate: { $gt: startDate, $lte: endDate } },
-        { startDate: { $lte: startDate }, endDate: { $gte: endDate } }
+        { startTime: { $lt: endTime, $gte: startTime } },
+        { endDate: { $gt: startTime, $lte: endTime } },
+        { startDate: { $lte: startTime }, endDate: { $gte: endTime } }
       ]
     });
 
@@ -853,8 +853,8 @@ app.post('/hangar-reservation', async (req, res) => {
       spot: selectedHangar._id,
       ownerName,
       reservationDate,
-      startDate,
-      endDate
+      startTime,
+      endTime
     });
 
     await reservation.save();
