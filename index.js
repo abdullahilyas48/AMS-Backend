@@ -807,10 +807,30 @@ app.get('/duties', async (req, res) => {
 
 const HangarReservation = require('./models/HangarReservation'); 
 const HangarSpot = require('./models/HangarSpot');
+
+app.get('/available-hangars', async (req, res) => {
+  try {
+    const availableHangars = await HangarSpot.find({ isAvailable: true });
+
+    res.status(200).json({
+      success: true,
+      hangars: availableHangars
+    });
+  } catch (error) {
+    console.error('Error fetching available hangars:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch available hangars',
+      error: error.message
+    });
+  }
+});
+
+
 app.post('/hangar-reservation', async (req, res) => {
   try {
     const {
-      userid, // User ID from the request
+      userid,
       selectedHangarId,
       ownerName,
       reservationDate,
@@ -818,12 +838,8 @@ app.post('/hangar-reservation', async (req, res) => {
       endTime
     } = req.body;
 
-    // Ensure userId is provided
-    if (!userid) {
-      return res.status(400).json({ message: 'User ID is required' });
-    }
+    if (!userid) return res.status(400).json({ message: 'User ID is required' });
 
-    // Check if the selected hangar is available
     const selectedHangar = await HangarSpot.findOne({
       _id: selectedHangarId,
       isAvailable: true
@@ -833,14 +849,13 @@ app.post('/hangar-reservation', async (req, res) => {
       return res.status(404).json({ message: 'Selected hangar is unavailable or does not exist' });
     }
 
-    // Check for reservation conflicts
     const conflict = await HangarReservation.findOne({
       spot: selectedHangar._id,
       reservationDate,
       $or: [
         { startTime: { $lt: endTime, $gte: startTime } },
-        { endDate: { $gt: startTime, $lte: endTime } },
-        { startDate: { $lte: startTime }, endDate: { $gte: endTime } }
+        { endTime: { $gt: startTime, $lte: endTime } },
+        { startTime: { $lte: startTime }, endTime: { $gte: endTime } }
       ]
     });
 
@@ -848,9 +863,8 @@ app.post('/hangar-reservation', async (req, res) => {
       return res.status(409).json({ message: 'Hangar already reserved in this time slot' });
     }
 
-    // Create a new reservation including the userId
     const reservation = new HangarReservation({
-      userId: userid, // Include userId
+      userId: userid,
       spot: selectedHangar._id,
       ownerName,
       reservationDate,
@@ -860,10 +874,8 @@ app.post('/hangar-reservation', async (req, res) => {
 
     await reservation.save();
 
-    // Update the hangar to mark it as unavailable
     await HangarSpot.findByIdAndUpdate(selectedHangar._id, { isAvailable: false });
 
-    // Respond with success
     res.status(201).json({ message: 'Hangar reservation successful', reservation });
   } catch (err) {
     console.error(err);
@@ -871,78 +883,107 @@ app.post('/hangar-reservation', async (req, res) => {
   }
 });
 
+
 const Airplane = require('./models/Airplanes');
 
 app.post('/add-airplane', async (req, res) => {
   const { userId, spotId, manufacturer, type, regNo } = req.body;
 
-  // Ensure userId is provided
-  if (!userId) {
-    return res.status(400).json({ success: false, message: 'User ID is required' });
+  if (!userId) return res.status(400).json({ success: false, message: 'User ID is required' });
+
+  const hangar = await HangarSpot.findById(spotId);
+
+  if (!hangar) {
+    return res.status(404).json({ success: false, message: 'Hangar not found' });
   }
 
-  // Check if there's already an airplane in the specified spot
-  const existingAirplane = await Airplane.findOne({ spot: spotId });
-  if (existingAirplane) {
-    return res.status(409).json({ success: false, message: "This spot already has an airplane." });
+  if (hangar.currentOccupancy >= hangar.capacity) {
+    return res.status(400).json({ success: false, message: 'Hangar is at full capacity' });
   }
 
-  // Create a new Airplane instance including the userId
-  const newAirplane = new Airplane({
+  const airplane = new Airplane({
+    userId,
     spot: spotId,
     manufacturer,
     type,
-    regNo,
-    userId // Store the userId associated with the airplane
+    regNo
   });
 
-  // Save the new airplane to the database
-  await newAirplane.save();
+  await airplane.save();
 
-  // Respond with success
+  hangar.currentOccupancy += 1;
+  await hangar.save();
+
   return res.status(201).json({
     success: true,
-    message: "Airplane added to the specified hangar spot.",
-    airplane: newAirplane
+    message: "Airplane added successfully",
+    airplane
   });
 });
 
 
-app.delete('/delete-hangar/:hangarId', async (req, res) => {
-  const { hangarId } = req.params;
-
-  // Check if the hangarId is a valid ObjectId
-  if (!mongoose.Types.ObjectId.isValid(hangarId)) {
-    return res.status(400).json({ success: false, message: "Invalid hangar ID format." });
-  }
+app.delete('/delete-hangar-reservation/:reservationId', async (req, res) => {
+  const { reservationId } = req.params;
 
   try {
-    // Find the hangar by ID
-    const hangar = await HangarSpot.findById(hangarId);
-
-    if (!hangar) {
-      return res.status(404).json({ success: false, message: "Hangar not found." });
+    const reservation = await HangarReservation.findById(reservationId);
+    if (!reservation) {
+      return res.status(404).json({ success: false, message: 'Reservation not found' });
     }
 
-    // Check if the hangar is available
-    if (hangar.isAvailable) {
-      return res.status(400).json({ success: false, message: "Hangar is still available and cannot be deleted." });
-    }
+    const spotId = reservation.spot;
 
-    // If the hangar is not available, delete it
-    const deletedHangar = await HangarSpot.findByIdAndDelete(hangarId);
+    // Delete all airplanes in that spot
+    await Airplane.deleteMany({ spot: spotId });
+
+    // Reset hangar
+    await HangarSpot.findByIdAndUpdate(spotId, {
+      isAvailable: true,
+      currentOccupancy: 0
+    });
+
+    await HangarReservation.findByIdAndDelete(reservationId);
 
     return res.status(200).json({
       success: true,
-      message: "Hangar deleted successfully.",
-      hangar: deletedHangar
+      message: 'Hangar reservation and associated airplanes deleted. Hangar is now available.'
     });
-
-  } catch (error) {
-    console.error(error); // Log the full error to see what is going wrong
-    return res.status(500).json({ success: false, message: "Server Error", error: error.message });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+
+app.delete('/delete-airplane/:airplaneId', async (req, res) => {
+  const { airplaneId } = req.params;
+
+  try {
+    const airplane = await Airplane.findById(airplaneId);
+    if (!airplane) {
+      return res.status(404).json({ success: false, message: 'Airplane not found' });
+    }
+
+    const spotId = airplane.spot;
+
+    await Airplane.findByIdAndDelete(airplaneId);
+
+    const hangar = await HangarSpot.findById(spotId);
+    if (hangar && hangar.currentOccupancy > 0) {
+      hangar.currentOccupancy -= 1;
+      await hangar.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Airplane deleted and hangar occupancy updated."
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 
 app.get('/passenger-details', async (req, res) => {
   const { date, flightNumber } = req.query;
