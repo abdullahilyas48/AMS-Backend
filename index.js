@@ -278,13 +278,15 @@ const ParkingSpot = require('./models/ParkingSpot');
 
 app.get('/parking-spots', async (req, res) => {
   try {
-    const spots = await ParkingSpot.find();
+    // Only fetch available spots
+    const spots = await ParkingSpot.find({ isAvailable: true });
     res.status(200).json(spots);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error while fetching spots' });
   }
 });
+
 
 app.post('/parking-reservation', async (req, res) => {
   try {
@@ -884,44 +886,6 @@ app.post('/hangar-reservation', async (req, res) => {
 });
 
 
-const Airplane = require('./models/Airplanes');
-
-app.post('/add-airplane', async (req, res) => {
-  const { userId, spotId, manufacturer, type, regNo } = req.body;
-
-  if (!userId) return res.status(400).json({ success: false, message: 'User ID is required' });
-
-  const hangar = await HangarSpot.findById(spotId);
-
-  if (!hangar) {
-    return res.status(404).json({ success: false, message: 'Hangar not found' });
-  }
-
-  if (hangar.currentOccupancy >= hangar.capacity) {
-    return res.status(400).json({ success: false, message: 'Hangar is at full capacity' });
-  }
-
-  const airplane = new Airplane({
-    userId,
-    spot: spotId,
-    manufacturer,
-    type,
-    regNo
-  });
-
-  await airplane.save();
-
-  hangar.currentOccupancy += 1;
-  await hangar.save();
-
-  return res.status(201).json({
-    success: true,
-    message: "Airplane added successfully",
-    airplane
-  });
-});
-
-
 app.delete('/delete-hangar-reservation/:reservationId', async (req, res) => {
   const { reservationId } = req.params;
 
@@ -954,6 +918,44 @@ app.delete('/delete-hangar-reservation/:reservationId', async (req, res) => {
   }
 });
 
+const Airplane = require('./models/Airplanes');
+
+app.post('/add-airplane', async (req, res) => {
+  const { userId, spotId, manufacturer, type, regNo } = req.body;
+
+  if (!userId) return res.status(400).json({ success: false, message: 'User ID is required' });
+
+  const hangar = await HangarSpot.findById(spotId);
+
+  if (!hangar) {
+    return res.status(404).json({ success: false, message: 'Hangar not found' });
+  }
+
+  if (hangar.currentOccupancy >= hangar.capacity) {
+    return res.status(400).json({ success: false, message: 'Hangar is at full capacity' });
+  }
+
+  const airplane = new Airplane({
+    userId,
+    spot: spotId,
+    manufacturer,
+    type,
+    regNo
+  });
+
+  await airplane.save();
+
+  hangar.currentOccupancy += 1;
+  await hangar.save();
+
+  await addPoints(userId, 'airplane')
+
+  return res.status(201).json({
+    success: true,
+    message: "Airplane added successfully",
+    airplane
+  });
+});
 
 app.delete('/delete-airplane/:airplaneId', async (req, res) => {
   const { airplaneId } = req.params;
