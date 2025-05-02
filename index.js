@@ -530,7 +530,7 @@ app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
   const { bookingId } = req.params;
 
   try {
-    const booking = await FlightBookingModel.findById(bookingId);
+    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.id });
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
@@ -560,7 +560,7 @@ app.post('/reschedule-flight', async (req, res) => {
 
   try {
     // Find the existing booking
-    const booking = await FlightBookingModel.findById(bookingId);
+    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.id });
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
