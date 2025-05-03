@@ -602,23 +602,24 @@ if (existingSeat) {
   }
 });
 
-app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
+aconst authenticateToken = require('./middleware/auth');
+
+app.delete('/cancel-flight-booking/:bookingId', authenticateToken, async (req, res) => {
   const { bookingId } = req.params;
 
   try {
-    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.id });
+    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.userId });
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
     const flightId = booking.flightId;
 
-    // Delete booking
     await FlightBookingModel.findByIdAndDelete(bookingId);
 
-    // Increment available seats on the flight
     await FlightModel.findByIdAndUpdate(flightId, {
-      $inc: { seatsAvailable: 1 }
+      $inc: { seatsAvailable: 1 },
+      $set: { available: true }  // Optional: mark flight as available again if it was full
     });
 
     res.json({ message: "Booking cancelled successfully" });
@@ -626,6 +627,7 @@ app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
     res.status(500).json({ error: "Cancellation failed", details: err.message });
   }
 });
+
 
 app.post('/reschedule-flight', async (req, res) => {
   const { bookingId, newDate, newTime, newFlightClass, luggageWeight, seatNumber } = req.body;
