@@ -835,7 +835,6 @@ app.post('/hangar-reservation', async (req, res) => {
       userid,
       selectedHangarId,
       ownerName,
-      reservationDate,
       startTime,
       endTime
     } = req.body;
@@ -853,7 +852,6 @@ app.post('/hangar-reservation', async (req, res) => {
 
     const conflict = await HangarReservation.findOne({
       spot: selectedHangar._id,
-      reservationDate,
       $or: [
         { startTime: { $lt: endTime, $gte: startTime } },
         { endTime: { $gt: startTime, $lte: endTime } },
@@ -869,7 +867,6 @@ app.post('/hangar-reservation', async (req, res) => {
       userId: userid,
       spot: selectedHangar._id,
       ownerName,
-      reservationDate,
       startTime,
       endTime
     });
@@ -917,6 +914,24 @@ app.delete('/delete-hangar-reservation/:reservationId', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+app.get('/hangar-reservation/:userid', async (req, res) => {
+  try {
+    const { userid } = req.params;
+
+    if (!userid) return res.status(400).json({ message: 'User ID is required' });
+
+    const reservations = await HangarReservation.find({ userId: userid })
+      .populate('spot') // optional: populates hangar details
+      .sort({ createdAt: -1 }); // sort by creation time instead
+
+    res.status(200).json({ reservations });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 
 const Airplane = require('./models/Airplanes');
 
