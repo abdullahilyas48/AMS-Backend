@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const ReservationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'users' },
-  spot: { type: mongoose.Schema.Types.ObjectId, ref: 'ParkingSpot', required: true },
+  spot: { type: mongoose.Schema.Types.ObjectId, ref: 'parkingspots', required: true },
   fullName: { type: String, required: true },
   vehicleType: { type: String, required: true },
   licensePlate: { type: String, required: true },

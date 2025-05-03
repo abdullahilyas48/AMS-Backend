@@ -292,12 +292,14 @@ app.get('/hotel-rooms', async (req, res) => {
   }
 });
 
-// 📤 Get all hotel bookings for a specific user
+
+// 📤 Get all hotel bookings for a specific user (FIXED VERSION)
 app.get('/user-hotel-bookings/:userId', async (req, res) => {
   const { userId } = req.params;
 
   try {
-    const bookings = await HotelBookingModel.find({ userId }).populate('hotelRoomId'); // Populate room details if needed
+    // ⚠️ Remove populate() completely - we don't need it
+    const bookings = await HotelBookingModel.find({ userId }).lean(); 
     
     if (bookings.length === 0) {
       return res.status(404).json({ message: "No hotel bookings found for this user" });
@@ -305,7 +307,12 @@ app.get('/user-hotel-bookings/:userId', async (req, res) => {
 
     res.json(bookings);
   } catch (err) {
-    res.status(500).json({ error: "Failed to retrieve hotel bookings", details: err });
+    // Better error logging
+    console.error("Hotel booking fetch error:", err); 
+    res.status(500).json({ 
+      error: "Failed to retrieve hotel bookings",
+      details: err.message // Show actual error
+    });
   }
 });
 
@@ -508,8 +515,8 @@ app.get('/lounges', async (req, res) => {
   }
 });
 
-// 📤 Get all lounge bookings for a specific user
-app.get('/user-lounge-bookings/:userId', async (req, res) => {
+ // 📤 Get all lounge bookings for a specific user
+ app.get('/user-lounge-bookings/:userId', async (req, res) => {
   const { userId } = req.params;
 
   try {
@@ -525,7 +532,6 @@ app.get('/user-lounge-bookings/:userId', async (req, res) => {
     res.status(500).json({ message: "Failed to retrieve lounge bookings", error: err.message });
   }
 });
-
 
 const FlightModel = require('./models/Flight');
 const FlightBookingModel = require('./models/FlightBooking');
