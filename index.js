@@ -972,6 +972,28 @@ app.post('/add-airplane', async (req, res) => {
   });
 });
 
+// GET all airplanes registered by a user
+app.get('/airplanes/:userid', async (req, res) => {
+  try {
+    const { userid } = req.params;
+
+    if (!userid) return res.status(400).json({ message: 'User ID is required' });
+
+    const airplanes = await Airplane.find({ userId: userid })
+      .populate('spot') // Ensure this matches your Airplane model's `ref`
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ airplanes });
+  } catch (err) {
+    console.error('Error in /airplanes/:userid:', err); // Add this
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+
+
+
 app.delete('/delete-airplane/:airplaneId', async (req, res) => {
   const { airplaneId } = req.params;
 
