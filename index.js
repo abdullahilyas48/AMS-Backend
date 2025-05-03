@@ -602,8 +602,6 @@ if (existingSeat) {
   }
 });
 
-aconst authenticateToken = require('./middleware/auth');
-
 app.delete('/cancel-flight-booking/:bookingId', authenticateToken, async (req, res) => {
   const { bookingId } = req.params;
 
