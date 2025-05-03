@@ -204,6 +204,25 @@ app.post('/reset-user-password', async (req, res) => {
     }
   });  
 
+
+  // 📤 Get all vehicle bookings for a specific user
+app.get('/user-vehicle-bookings/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const bookings = await BookingModel.find({ userId }).populate('vehicleId'); // Populate vehicle details if needed
+    
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: "No bookings found for this user" });
+    }
+
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to retrieve bookings", details: err });
+  }
+});
+
+
   const HotelRoomModel = require('./models/HotelRoom');
 const HotelBookingModel = require('./models/HotelBooking');
 
@@ -272,6 +291,24 @@ app.get('/hotel-rooms', async (req, res) => {
     res.status(500).json({ error: "Failed to fetch hotel rooms", details: err.message });
   }
 });
+
+// 📤 Get all hotel bookings for a specific user
+app.get('/user-hotel-bookings/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const bookings = await HotelBookingModel.find({ userId }).populate('hotelRoomId'); // Populate room details if needed
+    
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: "No hotel bookings found for this user" });
+    }
+
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to retrieve hotel bookings", details: err });
+  }
+});
+
 
 const Reservation = require('./models/ParkingReservation');
 const ParkingSpot = require('./models/ParkingSpot');
@@ -371,6 +408,26 @@ app.delete('/cancel-parking-reservation/:reservationId', async (req, res) => {
   }
 });
 
+// 📤 Get all parking reservations for a specific user
+app.get('/user-parking-reservations/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // Find all reservations for the user
+    const reservations = await Reservation.find({ userId }).populate('spot'); // Populate parking spot details if needed
+
+    if (reservations.length === 0) {
+      return res.status(404).json({ message: "No parking reservations found for this user" });
+    }
+
+    res.json(reservations);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to retrieve parking reservations", error: err.message });
+  }
+});
+
+
 
 const LoungeModel = require('./models/Lounge');
 const LoungeBookingModel = require('./models/LoungeBooking');
@@ -450,6 +507,25 @@ app.get('/lounges', async (req, res) => {
     res.status(500).json({ error: "Failed to fetch lounges", details: err.message });
   }
 });
+
+// 📤 Get all lounge bookings for a specific user
+app.get('/user-lounge-bookings/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const bookings = await LoungeBookingModel.find({ userId }).populate('loungeId'); // Populate lounge details if needed
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: "No lounge bookings found for this user" });
+    }
+
+    res.json(bookings);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to retrieve lounge bookings", error: err.message });
+  }
+});
+
 
 const FlightModel = require('./models/Flight');
 const FlightBookingModel = require('./models/FlightBooking');
@@ -639,6 +715,27 @@ app.get('/booked-flights', async (req, res) => {
     res.json(bookings);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch booked flights', details: err.message });
+  }
+});
+
+// 📤 Get all flight bookings for a specific user
+app.get('/user-flight-bookings/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // Find all bookings made by the user and populate the flight details
+    const bookings = await FlightBookingModel.find({ userId })
+      .populate('flightId', 'flightNumber airline from to date time arrivalTime flightClass price seatNumber') // Optional: adjust fields as needed
+      .exec();
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: "No flight bookings found for this user" });
+    }
+
+    res.json(bookings);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to retrieve flight bookings", error: err.message });
   }
 });
 
@@ -989,9 +1086,6 @@ app.get('/airplanes/:userid', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-
-
 
 
 app.delete('/delete-airplane/:airplaneId', async (req, res) => {
