@@ -204,6 +204,25 @@ app.post('/reset-user-password', async (req, res) => {
     }
   });  
 
+
+  // 📤 Get all vehicle bookings for a specific user
+app.get('/user-vehicle-bookings/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const bookings = await BookingModel.find({ userId }).populate('vehicleId'); // Populate vehicle details if needed
+    
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: "No bookings found for this user" });
+    }
+
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to retrieve bookings", details: err });
+  }
+});
+
+
   const HotelRoomModel = require('./models/HotelRoom');
 const HotelBookingModel = require('./models/HotelBooking');
 
@@ -272,6 +291,31 @@ app.get('/hotel-rooms', async (req, res) => {
     res.status(500).json({ error: "Failed to fetch hotel rooms", details: err.message });
   }
 });
+
+
+// 📤 Get all hotel bookings for a specific user (FIXED VERSION)
+app.get('/user-hotel-bookings/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // ⚠️ Remove populate() completely - we don't need it
+    const bookings = await HotelBookingModel.find({ userId }).lean(); 
+    
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: "No hotel bookings found for this user" });
+    }
+
+    res.json(bookings);
+  } catch (err) {
+    // Better error logging
+    console.error("Hotel booking fetch error:", err); 
+    res.status(500).json({ 
+      error: "Failed to retrieve hotel bookings",
+      details: err.message // Show actual error
+    });
+  }
+});
+
 
 const Reservation = require('./models/ParkingReservation');
 const ParkingSpot = require('./models/ParkingSpot');
@@ -371,6 +415,26 @@ app.delete('/cancel-parking-reservation/:reservationId', async (req, res) => {
   }
 });
 
+// 📤 Get all parking reservations for a specific user
+app.get('/user-parking-reservations/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // Find all reservations for the user
+    const reservations = await Reservation.find({ userId }).populate('spot'); // Populate parking spot details if needed
+
+    if (reservations.length === 0) {
+      return res.status(404).json({ message: "No parking reservations found for this user" });
+    }
+
+    res.json(reservations);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to retrieve parking reservations", error: err.message });
+  }
+});
+
+
 
 const LoungeModel = require('./models/Lounge');
 const LoungeBookingModel = require('./models/LoungeBooking');
@@ -451,6 +515,24 @@ app.get('/lounges', async (req, res) => {
   }
 });
 
+ // 📤 Get all lounge bookings for a specific user
+ app.get('/user-lounge-bookings/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const bookings = await LoungeBookingModel.find({ userId }).populate('loungeId'); // Populate lounge details if needed
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: "No lounge bookings found for this user" });
+    }
+
+    res.json(bookings);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to retrieve lounge bookings", error: err.message });
+  }
+});
+
 const FlightModel = require('./models/Flight');
 const FlightBookingModel = require('./models/FlightBooking');
 
@@ -526,23 +608,22 @@ if (existingSeat) {
   }
 });
 
-app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
+app.delete('/cancel-flight-booking/:bookingId', authenticateToken, async (req, res) => {
   const { bookingId } = req.params;
 
   try {
-    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.id });
+    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.userId });
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
     const flightId = booking.flightId;
 
-    // Delete booking
     await FlightBookingModel.findByIdAndDelete(bookingId);
 
-    // Increment available seats on the flight
     await FlightModel.findByIdAndUpdate(flightId, {
-      $inc: { seatsAvailable: 1 }
+      $inc: { seatsAvailable: 1 },
+      $set: { available: true }  // Optional: mark flight as available again if it was full
     });
 
     res.json({ message: "Booking cancelled successfully" });
@@ -551,7 +632,8 @@ app.delete('/cancel-flight-booking/:bookingId', async (req, res) => {
   }
 });
 
-app.post('/reschedule-flight', async (req, res) => {
+
+app.post('/reschedule-flight', authenticateToken, async (req, res) => {
   const { bookingId, newDate, newTime, newFlightClass, luggageWeight, seatNumber } = req.body;
 
   if (!seatNumber) {
@@ -559,39 +641,53 @@ app.post('/reschedule-flight', async (req, res) => {
   }
 
   try {
-    // Find the existing booking
-    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.id });
+    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.userId });
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    // Find the current flight associated with the booking
     const oldFlight = await FlightModel.findById(booking.flightId);
     if (!oldFlight) {
       return res.status(404).json({ error: "Old flight not found" });
     }
 
-    // Find a new flight with the same source and destination
+    // Normalize class input
+    const normalizedClass = newFlightClass.toLowerCase();
+
+    // Try to find exact match flight
     const newFlight = await FlightModel.findOne({
       from: oldFlight.from,
       to: oldFlight.to,
       date: newDate,
       time: newTime,
-      flightClass: newFlightClass,
+      flightClass: { $regex: `^${normalizedClass}$`, $options: 'i' },
       available: true,
       seatsAvailable: { $gte: 1 }
     });
 
     if (!newFlight) {
-      return res.status(404).json({ error: "No matching flight available for rescheduling" });
+      // Suggest alternatives (same route & class, any time on that date)
+      const alternatives = await FlightModel.find({
+        from: oldFlight.from,
+        to: oldFlight.to,
+        date: newDate,
+        flightClass: { $regex: `^${normalizedClass}$`, $options: 'i' },
+        available: true,
+        seatsAvailable: { $gte: 1 }
+      });
+
+      return res.status(404).json({
+        error: "No matching flight available for rescheduling",
+        alternatives
+      });
     }
 
-    // Check if the new luggage weight exceeds the new flight's max limit
     if (luggageWeight > newFlight.maxLuggageWeight) {
-      return res.status(400).json({ error: `Luggage exceeds the allowed weight of ${newFlight.maxLuggageWeight}kg for the new flight` });
+      return res.status(400).json({
+        error: `Luggage exceeds the allowed weight of ${newFlight.maxLuggageWeight}kg for the new flight`
+      });
     }
 
-    // ✅ Check if seat is already booked on the new flight
     const seatTaken = await FlightBookingModel.findOne({
       flightId: newFlight._id,
       seatNumber
@@ -603,7 +699,7 @@ app.post('/reschedule-flight', async (req, res) => {
 
     // Restore seat on old flight
     oldFlight.seatsAvailable += 1;
-    oldFlight.available = oldFlight.seatsAvailable > 0;
+    oldFlight.available = true;
     await oldFlight.save();
 
     // Reduce seat on new flight
@@ -614,7 +710,7 @@ app.post('/reschedule-flight', async (req, res) => {
     // Update booking
     booking.flightId = newFlight._id;
     booking.luggageWeight = luggageWeight;
-    booking.seatNumber = seatNumber; // ✅ force new seat
+    booking.seatNumber = seatNumber;
     await booking.save();
 
     res.json({ message: "Flight rescheduled successfully", booking });
@@ -624,21 +720,42 @@ app.post('/reschedule-flight', async (req, res) => {
 });
 
 
-app.get('/booked-flights', async (req, res) => {
+
+app.get('/booked-flights', authenticateToken, async (req, res) => {
   try {
-    // Find all bookings, populating the flight information (flightId references Flight model)
-    const bookings = await FlightBookingModel.find()
+    const bookings = await FlightBookingModel.find({ userId: req.user.userId })
       .populate('flightId', 'flightNumber airline from to date time arrivalTime flightClass price seatsAvailable available seatNumber')
       .exec();
 
-    if (bookings.length === 0) {
+    if (!bookings || bookings.length === 0) {
       return res.json({ message: 'No bookings found.' });
     }
 
-    // Return all booked flights along with flight details
     res.json(bookings);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch booked flights', details: err.message });
+  }
+});
+
+
+// 📤 Get all flight bookings for a specific user
+app.get('/user-flight-bookings/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // Find all bookings made by the user and populate the flight details
+    const bookings = await FlightBookingModel.find({ userId })
+      .populate('flightId', 'flightNumber airline from to date time arrivalTime flightClass price seatNumber') // Optional: adjust fields as needed
+      .exec();
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: "No flight bookings found for this user" });
+    }
+
+    res.json(bookings);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to retrieve flight bookings", error: err.message });
   }
 });
 
@@ -835,7 +952,6 @@ app.post('/hangar-reservation', async (req, res) => {
       userid,
       selectedHangarId,
       ownerName,
-      reservationDate,
       startTime,
       endTime
     } = req.body;
@@ -853,7 +969,6 @@ app.post('/hangar-reservation', async (req, res) => {
 
     const conflict = await HangarReservation.findOne({
       spot: selectedHangar._id,
-      reservationDate,
       $or: [
         { startTime: { $lt: endTime, $gte: startTime } },
         { endTime: { $gt: startTime, $lte: endTime } },
@@ -869,7 +984,6 @@ app.post('/hangar-reservation', async (req, res) => {
       userId: userid,
       spot: selectedHangar._id,
       ownerName,
-      reservationDate,
       startTime,
       endTime
     });
@@ -918,6 +1032,24 @@ app.delete('/delete-hangar-reservation/:reservationId', async (req, res) => {
   }
 });
 
+app.get('/hangar-reservation/:userid', async (req, res) => {
+  try {
+    const { userid } = req.params;
+
+    if (!userid) return res.status(400).json({ message: 'User ID is required' });
+
+    const reservations = await HangarReservation.find({ userId: userid })
+      .populate('spot') // optional: populates hangar details
+      .sort({ createdAt: -1 }); // sort by creation time instead
+
+    res.status(200).json({ reservations });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
 const Airplane = require('./models/Airplanes');
 
 app.post('/add-airplane', async (req, res) => {
@@ -956,6 +1088,25 @@ app.post('/add-airplane', async (req, res) => {
     airplane
   });
 });
+
+// GET all airplanes registered by a user
+app.get('/airplanes/:userid', async (req, res) => {
+  try {
+    const { userid } = req.params;
+
+    if (!userid) return res.status(400).json({ message: 'User ID is required' });
+
+    const airplanes = await Airplane.find({ userId: userid })
+      .populate('spot') // Ensure this matches your Airplane model's `ref`
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ airplanes });
+  } catch (err) {
+    console.error('Error in /airplanes/:userid:', err); // Add this
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 
 app.delete('/delete-airplane/:airplaneId', async (req, res) => {
   const { airplaneId } = req.params;
