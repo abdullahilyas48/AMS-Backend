@@ -737,7 +737,6 @@ app.get('/booked-flights', authenticateToken, async (req, res) => {
   }
 });
 
-
 // 📤 Get all flight bookings for a specific user
 app.get('/user-flight-bookings/:userId', async (req, res) => {
   const { userId } = req.params;
