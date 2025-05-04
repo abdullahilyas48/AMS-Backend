@@ -633,7 +633,7 @@ app.delete('/cancel-flight-booking/:bookingId', authenticateToken, async (req, r
 });
 
 
-app.post('/reschedule-flight', async (req, res) => {
+app.post('/reschedule-flight', authenticateToken, async (req, res) => {
   const { bookingId, newDate, newTime, newFlightClass, luggageWeight, seatNumber } = req.body;
 
   if (!seatNumber) {
@@ -641,39 +641,53 @@ app.post('/reschedule-flight', async (req, res) => {
   }
 
   try {
-    // Find the existing booking
-    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.id });
+    const booking = await FlightBookingModel.findOne({ _id: bookingId, userId: req.user.userId });
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    // Find the current flight associated with the booking
     const oldFlight = await FlightModel.findById(booking.flightId);
     if (!oldFlight) {
       return res.status(404).json({ error: "Old flight not found" });
     }
 
-    // Find a new flight with the same source and destination
+    // Normalize class input
+    const normalizedClass = newFlightClass.toLowerCase();
+
+    // Try to find exact match flight
     const newFlight = await FlightModel.findOne({
       from: oldFlight.from,
       to: oldFlight.to,
       date: newDate,
       time: newTime,
-      flightClass: newFlightClass,
+      flightClass: { $regex: `^${normalizedClass}$`, $options: 'i' },
       available: true,
       seatsAvailable: { $gte: 1 }
     });
 
     if (!newFlight) {
-      return res.status(404).json({ error: "No matching flight available for rescheduling" });
+      // Suggest alternatives (same route & class, any time on that date)
+      const alternatives = await FlightModel.find({
+        from: oldFlight.from,
+        to: oldFlight.to,
+        date: newDate,
+        flightClass: { $regex: `^${normalizedClass}$`, $options: 'i' },
+        available: true,
+        seatsAvailable: { $gte: 1 }
+      });
+
+      return res.status(404).json({
+        error: "No matching flight available for rescheduling",
+        alternatives
+      });
     }
 
-    // Check if the new luggage weight exceeds the new flight's max limit
     if (luggageWeight > newFlight.maxLuggageWeight) {
-      return res.status(400).json({ error: `Luggage exceeds the allowed weight of ${newFlight.maxLuggageWeight}kg for the new flight` });
+      return res.status(400).json({
+        error: `Luggage exceeds the allowed weight of ${newFlight.maxLuggageWeight}kg for the new flight`
+      });
     }
 
-    // ✅ Check if seat is already booked on the new flight
     const seatTaken = await FlightBookingModel.findOne({
       flightId: newFlight._id,
       seatNumber
@@ -685,7 +699,7 @@ app.post('/reschedule-flight', async (req, res) => {
 
     // Restore seat on old flight
     oldFlight.seatsAvailable += 1;
-    oldFlight.available = oldFlight.seatsAvailable > 0;
+    oldFlight.available = true;
     await oldFlight.save();
 
     // Reduce seat on new flight
@@ -696,7 +710,7 @@ app.post('/reschedule-flight', async (req, res) => {
     // Update booking
     booking.flightId = newFlight._id;
     booking.luggageWeight = luggageWeight;
-    booking.seatNumber = seatNumber; // ✅ force new seat
+    booking.seatNumber = seatNumber;
     await booking.save();
 
     res.json({ message: "Flight rescheduled successfully", booking });
@@ -706,18 +720,17 @@ app.post('/reschedule-flight', async (req, res) => {
 });
 
 
-app.get('/booked-flights', async (req, res) => {
+
+app.get('/booked-flights', authenticateToken, async (req, res) => {
   try {
-    // Find all bookings, populating the flight information (flightId references Flight model)
-    const bookings = await FlightBookingModel.find()
+    const bookings = await FlightBookingModel.find({ userId: req.user.userId })
       .populate('flightId', 'flightNumber airline from to date time arrivalTime flightClass price seatsAvailable available seatNumber')
       .exec();
 
-    if (bookings.length === 0) {
+    if (!bookings || bookings.length === 0) {
       return res.json({ message: 'No bookings found.' });
     }
 
-    // Return all booked flights along with flight details
     res.json(bookings);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch booked flights', details: err.message });
